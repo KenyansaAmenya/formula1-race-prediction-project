@@ -1,0 +1,117 @@
+environment: ${ENVIRONMENT:-development}
+
+database:
+  pool_size: 10
+  max_overflow: 20
+  pool_timeout: 30
+  pool_recycle: 1800
+  echo: false
+
+# API Security
+api:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 4
+  cors_origins: ${CORS_ORIGINS:-["http://localhost:3000","https://f1-platform.vercel.app"]}
+  rate_limit: "100/minute"
+  
+  jwt:
+    secret_key: ${JWT_SECRET_KEY}
+    algorithm: "HS256"
+    access_token_expire_minutes: 30
+    refresh_token_expire_days: 7
+  
+  api_key_header: "X-API-Key"
+
+#ML Pipeline
+ml:
+  model_dir: "./artifacts/models"
+  metrics_dir: "./artifacts/metrics"
+  random_state: 42
+  test_size: 0.2
+  validation_size: 0.1
+  
+  targets:
+    - is_winner
+    - is_top3
+    - points
+  
+  models:
+    baseline:
+      - logistic_regression
+    advanced:
+      - random_forest
+      - xgboost
+  
+  hyperparameters:
+    random_forest:
+      n_estimators: [100, 200]
+      max_depth: [10, 20, None]
+      min_samples_split: [2, 5]
+    xgboost:
+      n_estimators: [100, 200]
+      max_depth: [3, 6, 9]
+      learning_rate: [0.01, 0.1]
+      subsample: [0.8, 1.0]
+
+#Frontend
+frontend:
+  build_dir: "./src/frontend/dist"
+  api_base_url: ${API_BASE_URL:-http://localhost:8000}
+  ws_url: ${WS_URL:-ws://localhost:8000/ws}
+
+#Redis
+redis:
+  url: ${REDIS_URL:-redis://localhost:6379/0}
+  enabled: ${REDIS_ENABLED:-false}
+
+ingestion:
+  ergast:
+    base_url: "https://ergast.com/api/f1"
+    retry_attempts: 3
+    retry_backoff: 2.0
+    timeout: 30
+    rate_limit: 1.0
+  openf1:
+    base_url: "https://api.openf1.org/v1"
+    retry_attempts: 5
+    retry_backoff: 2.5
+    timeout: 45
+    rate_limit: 2.0
+  fastf1:
+    cache_dir: "./data/fastf1_cache"
+    retry_attempts: 3
+    timeout: 60
+
+storage:
+  raw_data_path: "./data/raw"
+  processed_data_path: "./data/processed"
+  telemetry_path: "./data/raw/telemetry"
+  format: "parquet"
+  compression: "zstd"
+
+processing:
+  null_threshold_numeric: 0.15
+  null_threshold_categorical: 0.10
+  duplicate_strategy: "composite_key"
+  timezone: "UTC"
+
+features:
+  rolling_window_races: 5
+  form_window_races: 3
+  min_races_for_rolling: 2
+
+logging:
+  level: ${LOG_LEVEL:-INFO}
+  format: ${LOG_FORMAT:-json}
+  file_rotation: "1 day"
+  retention: "30 days"
+
+security:
+  mask_sensitive_fields: true
+  max_query_limit: 10000
+  enable_rls: true
+
+orchestration:
+  dag_id: "f1_data_pipeline"
+  schedule_interval: "0 6 * * 1"
