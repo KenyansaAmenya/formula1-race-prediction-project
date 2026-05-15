@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
-from pydantic import Field, PostgresDsn, SecretStr, validator
+from pydantic import Field, SecretStr, validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,7 +15,10 @@ class Environment(str, Enum):
 
 
 class DatabaseConfig(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="DB_")
+    model_config = SettingsConfigDict(
+        env_prefix="DB_",
+        extra="allow"  # Allow extra fields from YAML
+    )
     
     host: str = Field(default="localhost", description="Database host")
     port: int = Field(default=5432, description="Database port")
@@ -24,12 +27,13 @@ class DatabaseConfig(BaseSettings):
     password: SecretStr = Field(default=SecretStr(""), description="Database password")
     ssl_mode: str = Field(default="require", description="SSL mode for connections")
     
-    pool_size: int = 10
-    max_overflow: int = 20
-    pool_timeout: int = 30
-    pool_recycle: int = 1800
+    # Pool settings
+    pool_size: int = Field(default=10)
+    max_overflow: int = Field(default=20)
+    pool_timeout: int = Field(default=30)
+    pool_recycle: int = Field(default=1800)
+    echo: bool = Field(default=False)
     
-    # connection string property
     @property
     def connection_string(self) -> str:
         password = self.password.get_secret_value() if self.password else ""
@@ -48,50 +52,69 @@ class DatabaseConfig(BaseSettings):
             f"?sslmode={self.ssl_mode}"
         )
 
-# configuration for external F1 data APIs
-class IngestionConfig(BaseSettings):
-    ergast_base_url: str = "https://ergast.com/api/f1"
-    ergast_retry_attempts: int = 3
-    ergast_retry_backoff: float = 2.0
-    ergast_timeout: int = 30
-    ergast_rate_limit: float = 1.0
+class ErgastConfig(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="ERGAST_", extra="allow")
     
-    openf1_base_url: str = "https://api.openf1.org/v1"
-    openf1_retry_attempts: int = 5
-    openf1_retry_backoff: float = 2.5
-    openf1_timeout: int = 45
-    openf1_rate_limit: float = 2.0
-    
-    fastf1_cache_dir: str = "./data/fastf1_cache"
-    fastf1_retry_attempts: int = 3
-    fastf1_timeout: int = 60
+    base_url: str = "https://ergast.com/api/f1"
+    retry_attempts: int = 3
+    retry_backoff: float = 2.0
+    timeout: int = 30
+    rate_limit: float = 1.0
 
-# defines the data lake directory structure
+class OpenF1Config(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="OPENF1_", extra="allow")
+    
+    base_url: str = "https://api.openf1.org/v1"
+    retry_attempts: int = 5
+    retry_backoff: float = 2.5
+    timeout: int = 45
+    rate_limit: float = 2.0
+
+
+class FastF1Config(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="FASTF1_", extra="allow")
+    
+    cache_dir: str = "./data/fastf1_cache"
+    retry_attempts: int = 3
+    timeout: int = 60
+
+
+class IngestionConfig(BaseSettings):
+    model_config = SettingsConfigDict(extra="allow")
+    
+    ergast: ErgastConfig = Field(default_factory=ErgastConfig)
+    openf1: OpenF1Config = Field(default_factory=OpenF1Config)
+    fastf1: FastF1Config = Field(default_factory=FastF1Config)
+
+
 class StorageConfig(BaseSettings):
+    model_config = SettingsConfigDict(extra="allow")
+    
     raw_data_path: str = "./data/raw"
     processed_data_path: str = "./data/processed"
     telemetry_path: str = "./data/raw/telemetry"
     format: str = "parquet"
     compression: str = "zstd"
 
-# Configuration for feature engineering for ML models
 class FeatureConfig(BaseSettings):
+    model_config = SettingsConfigDict(extra="allow")
+    
     rolling_window_races: int = 5
     form_window_races: int = 3
     min_races_for_rolling: int = 2
 
-# Security controls for data access
 class SecurityConfig(BaseSettings):
+    model_config = SettingsConfigDict(extra="allow")
+    
     mask_sensitive_fields: bool = True
     max_query_limit: int = 10000
     enable_rls: bool = True
-
 
 class AppConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        extra="ignore"
+        extra="allow"  # Allow extra fields from YAML
     )
     
     environment: Environment = Field(default=Environment.DEVELOPMENT)
@@ -103,8 +126,7 @@ class AppConfig(BaseSettings):
     storage: StorageConfig = Field(default_factory=StorageConfig)
     features: FeatureConfig = Field(default_factory=FeatureConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
-
-    #    
+    
     @classmethod
     def from_yaml(cls, config_path: str = "config/settings.yaml") -> "AppConfig":
         path = Path(config_path)
@@ -121,7 +143,6 @@ class AppConfig(BaseSettings):
     
     @staticmethod
     def _substitute_env_vars(obj: Any) -> Any:
-
         if isinstance(obj, dict):
             return {k: AppConfig._substitute_env_vars(v) for k, v in obj.items()}
         elif isinstance(obj, list):
@@ -152,7 +173,7 @@ class AppConfig(BaseSettings):
         return path.resolve()
 
 
-# Global configuration instance (singleton pattern)
+# Global configuration instance
 _config_instance: Optional[AppConfig] = None
 
 
