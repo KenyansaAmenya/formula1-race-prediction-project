@@ -2,7 +2,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from src.api.main import prediction_service
+from src.api.dependencies import prediction_service
 from src.services.prediction_service import PredictionResponse
 from src.utils.logger import get_logger
 from src.utils.security import UserContext, get_current_user, require_role
@@ -16,7 +16,7 @@ async def predict_driver(
     driver_id: int = Query(..., description="Driver identifier"),
     model_type: str = Query("xgboost", enum=["logistic_regression", "random_forest", "xgboost"]),
     target: str = Query("is_winner", enum=["is_winner", "is_top3"]),
-    current_user: UserContext = Depends(get_current_user)
+    current_user: UserContext = Depends(get_current_user)  # Commented out for testing
 ):
    
     if not prediction_service:

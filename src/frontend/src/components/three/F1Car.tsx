@@ -3,102 +3,89 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 
 interface F1CarProps {
-    teamColor?: string
-    scale?: number
-    rotationSpeed?: number
-    isAnimating?: boolean
+  teamColor?: string
+  scale?: number
+  rotationSpeed?: number
+  isAnimating?: boolean
 }
 
 export default function F1Car({
-    teamColor = '#ef4444',
-    scale = 1,
-    rotationSpeed = 0.5,
-    isAnimating = true
+  teamColor = '#ef4444',
+  scale = 1,
+  rotationSpeed = 0.5,
+  isAnimating = true
 }: F1CarProps) {
-    const groupRef = useRef<THREE.Group>(null)
-    const wheelsRef = useRef<THREE.Group>(null)
-
-    // Simplified F1 car geometry using primitives
-    const carBody = useMemo(() => {
-        const shape = new THREE.Shape()
-        // Side profile of F1 car
-        shape.moveTo(0, 0)
-        shape.lineTo(3, 0)      // Floor
-        shape.lineTo(3.2, 0.3)  // Nose tip
-        shape.lineTo(2.8, 0.5)  // Nose top
-        shape.lineTo(1.5, 0.8)  // Cockpit
-        shape.lineTo(0.5, 1.0)  // Roll hoop
-        shape.lineTo(0, 0.9)    // Engine cover
-        shape.lineTo(-0.3, 0.5) // Rear wing
-        shape.lineTo(-0.3, 0.2) // Rear wing support
-        shape.lineTo(0, 0)
-
-        const extrudeSettings = {
-            steps: 1,
-            depth: 0.8,
-            bevelEnabled: true,
-            bevelThickness: 0.05,
-            bevelSize: 0.05,
-            bevelSegments: 2
-        }
-
-        return new THREE.ExtrudeGeometry(shape, extrudeSettings)
-    }, [])
-
-    useFrame((state) => {
-        if (groupRef.current && isAnimating) {
-            // Gentle floating animation
-            groupRef.current.position.y = Math.sin(state.clock.elapsedTime * 2) * 0.1
-            // Rotation
-            groupRef.current.rotation.y += rotationSpeed * 0.01
-        }
-
-        if (wheelsRef.current && isAnimating) {
-            // Wheel rotation
-            wheelsRef.current.children.forEach((wheel, i) => {
-                wheel.rotation.x += 0.1 * (i % 2 === 0 ? 1 : -1)
-            })
-        }
-    })
-
-    return (
-        <group ref={groupRef} scale={scale}>
-            {/* Car Body */}
-            <mesh geometry={carBody} position={[-1.5, 0, -0.4]}>
-                <meshStandardMaterial
-                    color={teamColor}
-                    metalness={0.8}
-                    roughness={0.2}
-                    envMapIntensity={1}
-                />
-            </mesh>
-
-            {/* Wheels */}
-            <group ref={wheelsRef}>
-                {/* Front Left */}
-                <mesh position={[2.2, 0.25, 0.6]} rotation={[0, 0, Math.PI / 2]}>
-                    <cylinderGeometry args={[0.25, 0.25, 0.15, 16]} />
-                    <meshStandardMaterial color="#1a1a1a" />
-                </mesh>
-                {/* Front Right */}
-                <mesh position={[2.2, 0.25, -0.6]} rotation={[0, 0, Math.PI / 2]}>
-                    <cylinderGeometry args={[0.25, 0.25, 0.15, 16]} />
-                    <meshStandardMaterial color="#1a1a1a" />
-                </mesh>
-                {/* Rear Left */}
-                <mesh position={[-0.3, 0.3, 0.65]} rotation={[0, 0, Math.PI / 2]}>
-                    <cylinderGeometry args={[0.28, 0.28, 0.2, 16]} />
-                    <meshStandardMaterial color="#1a1a1a" />
-                </mesh>
-                {/* Rear Right */}
-                <mesh position={[-0.3, 0.3, -0.65]} rotation={[0, 0, Math.PI / 2  I'll continue building the remaining critical components of Phase 2 — completing the frontend, notebooks, deployment configs, and CI/CD.
-
----
-
-## 6. 3D React Frontend(continued)
-
-### `src/frontend/src/components/three/F1Car.tsx`(continued)
-                        ```typescript
+  const groupRef = useRef<<THREE.Group>(null)
+  const wheelsRef = useRef<<THREE.Group>(null)
+  
+  const carBody = useMemo(() => {
+    const shape = new THREE.Shape()
+    shape.moveTo(0, 0)
+    shape.lineTo(3, 0)
+    shape.lineTo(3.2, 0.3)
+    shape.lineTo(2.8, 0.5)
+    shape.lineTo(1.5, 0.8)
+    shape.lineTo(0.5, 1.0)
+    shape.lineTo(0, 0.9)
+    shape.lineTo(-0.3, 0.5)
+    shape.lineTo(-0.3, 0.2)
+    shape.lineTo(0, 0)
+    
+    const extrudeSettings = {
+      steps: 1,
+      depth: 0.8,
+      bevelEnabled: true,
+      bevelThickness: 0.05,
+      bevelSize: 0.05,
+      bevelSegments: 2
+    }
+    
+    return new THREE.ExtrudeGeometry(shape, extrudeSettings)
+  }, [])
+  
+  useFrame((state) => {
+    if (groupRef.current && isAnimating) {
+      groupRef.current.position.y = Math.sin(state.clock.elapsedTime * 2) * 0.1
+      groupRef.current.rotation.y += rotationSpeed * 0.01
+    }
+    
+    if (wheelsRef.current && isAnimating) {
+      wheelsRef.current.children.forEach((wheel, i) => {
+        wheel.rotation.x += 0.1 * (i % 2 === 0 ? 1 : -1)
+      })
+    }
+  })
+  
+  return (
+    <group ref={groupRef} scale={scale}>
+      {/* Car Body */}
+      <mesh geometry={carBody} position={[-1.5, 0, -0.4]}>
+        <meshStandardMaterial
+          color={teamColor}
+          metalness={0.8}
+          roughness={0.2}
+          envMapIntensity={1}
+        />
+      </mesh>
+      
+      {/* Wheels */}
+      <group ref={wheelsRef}>
+        {/* Front Left */}
+        <mesh position={[2.2, 0.25, 0.6]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.25, 0.25, 0.15, 16]} />
+          <meshStandardMaterial color="#1a1a1a" />
+        </mesh>
+        {/* Front Right */}
+        <mesh position={[2.2, 0.25, -0.6]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.25, 0.25, 0.15, 16]} />
+          <meshStandardMaterial color="#1a1a1a" />
+        </mesh>
+        {/* Rear Left */}
+        <mesh position={[-0.3, 0.3, 0.65]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.28, 0.28, 0.2, 16]} />
+          <meshStandardMaterial color="#1a1a1a" />
+        </mesh>
+        {/* Rear Right */}
         <mesh position={[-0.3, 0.3, -0.65]} rotation={[0, 0, Math.PI / 2]}>
           <cylinderGeometry args={[0.28, 0.28, 0.2, 16]} />
           <meshStandardMaterial color="#1a1a1a" />

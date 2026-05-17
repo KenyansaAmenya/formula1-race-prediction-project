@@ -1,4 +1,4 @@
-import time
+﻿import time
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
@@ -6,32 +6,32 @@ from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, APIKeyHeader
 
+from src.api.dependencies import prediction_service
 from src.api.middleware import LoggingMiddleware, RateLimitMiddleware
 from src.api.routes import auth, predictions, data, health
-from src.services.prediction_service import PredictionService
 from src.utils.config import get_config
 from src.utils.db import get_db
 from src.utils.logger import get_logger
 from src.utils.security import get_current_user, rate_limit_dependency
 
 logger = get_logger(__name__)
+config = get_config()
 
-# Global service instances
-prediction_service: Optional[PredictionService] = None
+# Simple API Key security for Swagger
+api_key_header = APIKeyHeader(name="Authorization", auto_error=False, description="Bearer <your_token>")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-   
     # Startup
-    logger.info("api_startup", environment=get_config().environment)
+    logger.info("api_startup", environment=config.environment)
     
-    global prediction_service
-    try:
-        prediction_service = PredictionService()
+    # Verify prediction service is initialized
+    if prediction_service:
         logger.info("prediction_service_initialized")
-    except Exception as e:
-        logger.error("prediction_service_init_failed", error=str(e))
+    else:
+        logger.error("prediction_service_init_failed")
     
     yield
     
@@ -45,18 +45,27 @@ app = FastAPI(
     title="F1 Race Prediction API",
     description="Enterprise AI platform for Formula 1 analytics",
     version="1.0.0",
-    docs_url="/docs" if get_config().environment != "production" else None,
-    redoc_url="/redoc" if get_config().environment != "production" else None,
-    lifespan=lifespan
+    docs_url="/docs" if config.environment != "production" else None,
+    redoc_url="/redoc" if config.environment != "production" else None,
+    lifespan=lifespan,
+    swagger_ui_parameters={
+        "persistAuthorization": True,
+    }
 )
 
 # CORS configuration
-config = get_config()
+cors_origins = ["*"]  
+if hasattr(config, 'api'):
+    if hasattr(config.api, 'cors_origins'):
+        cors_origins = config.api.cors_origins
+    elif isinstance(config.api, dict):
+        cors_origins = config.api.get('cors_origins', ["http://localhost:3000", "http://127.0.0.1:3000"])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=config.api.cors_origins,
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
