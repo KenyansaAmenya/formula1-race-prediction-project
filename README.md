@@ -1,7 +1,7 @@
 # Formula 1 Race Prediction Platform
 
 An end-to-end Formula 1 analytics platform for **data ingestion**, **feature engineering**, **machine learning model training**, and **real-time race prediction delivery** via a FastAPI backend and React frontend.
-
+![Dashboard](dashbord.png)
 ---
 
 ## Table of Contents
@@ -96,23 +96,98 @@ High-level flow:
 
 ```text
 formula1-race-prediction-project/
-├── app/                      # Legacy Streamlit monitoring app
-├── config/                   # Central project configuration (settings.yaml)
-├── notebooks/                # EDA, feature analysis, experiments, explainability
-├── sql/                      # PostgreSQL schema and security policies
+├── app/
+│   └── streamlit_app.py              # Phase 1 monitoring (legacy)
+├── artifacts/
+│   ├── models/                       # Serialized ML models
+│   └── metrics/                      # Evaluation reports
+├── config/
+│   └── settings.yaml                 # Unified configuration
+├── data/
+│   ├── raw/
+│   └── processed/
+├── notebooks/
+│   ├── 01_eda.ipynb                 # Exploratory analysis
+│   ├── 02_feature_analysis.ipynb    # Feature validation
+│   ├── 03_model_experiments.ipynb   # Model training
+│   ├── 04_prediction_analysis.ipynb # Prediction review
+│   └── 05_model_explainability.ipynb # SHAP analysis
+├── sql/
+│   └── schema_postgres.sql           # Database schema + RLS
 ├── src/
-│   ├── api/                  # FastAPI app + routes + middleware
-│   ├── ingestion/            # External data connectors
-│   ├── processing/           # Data cleaning pipeline
-│   ├── features/             # Feature engineering
-│   ├── models/               # Training + evaluation workflows
-│   ├── services/             # Prediction/inference service layer
-│   ├── utils/                # Config, DB, logging, security utilities
-│   └── frontend/             # React web application
-├── tests/                    # Unit/API/security tests
-├── scripts/                  # Local/dev helper scripts
-├── docker-compose.yml        # Multi-service orchestration
-├── Dockerfile                # API image build
+│   ├── api/
+│   │   ├── main.py                   # FastAPI application
+│   │   ├── middleware.py             # Logging & rate limiting
+│   │   └── routes/
+│   │       ├── auth.py              # JWT authentication
+│   │       ├── predictions.py       # Prediction endpoints
+│   │       ├── data.py              # Data endpoints
+│   │       └── health.py            # Health checks
+│   ├── frontend/                     # React 3D Application
+│   │   ├── package.json
+│   │   ├── vite.config.ts
+│   │   ├── tailwind.config.js
+│   │   ├── Dockerfile
+│   │   └── src/
+│   │       ├── main.tsx
+│   │       ├── App.tsx
+│   │       ├── index.css
+│   │       ├── lib/
+│   │       │   └── api.ts           # API client
+│   │       ├── components/
+│   │       │   ├── Layout.tsx
+│   │       │   ├── Navigation.tsx
+│   │       │   ├── three/
+│   │       │   │   ├── F1Car.tsx
+│   │       │   │   ├── DriverCard.tsx
+│   │       │   │   ├── PodiumScene.tsx
+│   │       │   │   └── BackgroundEffect.tsx
+│   │       │   └── charts/
+│   │       │       └── PredictionChart.tsx
+│   │       └── pages/
+│   │           ├── Dashboard.tsx
+│   │           ├── Login.tsx
+│   │           ├── RacePredictions.tsx
+│   │           ├── DriverAnalysis.tsx
+│   │           └── Leaderboard.tsx
+│   ├── ingestion/
+│   │   ├── base.py
+│   │   ├── ingest_ergast.py
+│   │   ├── ingest_openf1.py
+│   │   └── ingest_fastf1.py
+│   ├── models/
+│   │   ├── train.py                 # ML training pipeline
+│   │   └── evaluate.py              # Model evaluation
+│   ├── processing/
+│   │   └── clean_data.py
+│   ├── features/
+│   │   └── build_features.py
+│   ├── services/
+│   │   └── prediction_service.py    # Inference engine
+│   ├── utils/
+│   │   ├── config.py
+│   │   ├── db.py
+│   │   ├── io_utils.py
+│   │   ├── logger.py
+│   │   └── security.py              # JWT & API key auth
+│   └── validation/
+│       └── __init__.py
+├── tests/
+│   ├── test_config.py
+│   ├── test_ingestion.py
+│   ├── test_processing.py
+│   ├── test_features.py
+│   ├── test_api.py                  # API endpoint tests
+│   └── test_security.py             # Auth tests
+├── .github/
+│   └── workflows/
+│       └── ci-cd.yml                # GitHub Actions
+├── nginx.conf                       # Reverse proxy config
+├── docker-compose.yml               # Full stack orchestration
+├── Dockerfile                       # API container
+├── requirements.txt
+├── .env.example
+├── .dockerignore
 └── README.md
 ```
 
