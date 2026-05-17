@@ -1,0 +1,57 @@
+{
+  "target": "winner",
+  "accuracy": 0.8416030534351145,
+  "precision": 0.23853211009174313,
+  "recall": 1.0,
+  "f1_score": 0.3851851851851852,
+  "confusion_matrix": [
+    [
+      415,
+      83
+    ],
+    [
+      0,
+      26
+    ]
+  ],
+  "classification_report": {
+    "0": {
+      "precision": 1.0,
+      "recall": 0.8333333333333334,
+      "f1-score": 0.9090909090909091,
+      "support": 498.0
+    },
+    "1": {
+      "precision": 0.23853211009174313,
+      "recall": 1.0,
+      "f1-score": 0.3851851851851852,
+      "support": 26.0
+    },
+    "accuracy": 0.8416030534351145,
+    "macro avg": {
+      "precision": 0.6192660550458715,
+      "recall": 0.9166666666666667,
+      "f1-score": 0.6471380471380471,
+      "support": 524.0
+    },
+    "weighted avg": {
+      "precision": 0.9622172421037888,
+      "recall": 0.8416030534351145,
+      "f1-score": 0.8830955869123808,
+      "support": 524.0
+    }
+  },
+  "roc_auc": 0.9518844609206055,
+  "feature_importance": {
+    "starting_position": 1.9481454168272114,
+    "rolling_avg_points_5r": 1.1727895672429054,
+    "constructor_performance_index": 0.5688071227415383,
+    "recent_form_finish_pos": 0.46878391233020594,
+    "recent_form_points": 0.3518060744899203,
+    "constructor_avg_points_5r": 0.21752996157435556,
+    "rolling_avg_finish_pos_5r": 0.16808149356530006,
+    "recent_form_quali_pos": 0.16547056690412415,
+    "track_best_finish_pos": 0.13505336683806216,
+    "driver_performance_index": 0.1329330532297989
+  }
+}

@@ -7,11 +7,12 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from imblearn.over_sampling import SMOTE
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.metrics import (
     accuracy_score, classification_report, confusion_matrix,
-    f1_score, precision_score, recall_score, roc_auc_score
+    f1_score, precision_score, recall_score, roc_auc_score,
+    mean_absolute_error, mean_squared_error, r2_score
 )
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -36,7 +37,7 @@ class F1ModelTrainer:
         'quali_position', 'quali_gap_to_pole_ms', 'grid_position_gain_potential',
         'wet_race_experience', 'wet_race_avg_points',
         'driver_performance_index', 'constructor_performance_index',
-        'starting_position', 'points'
+        'starting_position'
     ]
     
     TARGET_COLS = ['is_winner', 'is_top3', 'points']
@@ -56,12 +57,7 @@ class F1ModelTrainer:
         
         self.scaler = StandardScaler()
     
-    # Load feature data with time-based filtering
-    def load_training_data(
-        self,
-        years: List[int],
-        require_targets: bool = True
-    ) -> pd.DataFrame:
+    def load_training_data(self, years: List[int]) -> pd.DataFrame:
         placeholders = ', '.join([f":year_{i}" for i in range(len(years))])
         params = {f"year_{i}": year for i, year in enumerate(years)}
         
@@ -79,15 +75,10 @@ class F1ModelTrainer:
         
         df = self.db.execute_dataframe(query, params)
         
-        # Handle missing features
         available_features = [c for c in self.FEATURE_COLS if c in df.columns]
         missing = set(self.FEATURE_COLS) - set(available_features)
         if missing:
             logger.warning("missing_features", features=list(missing))
-        
-        # Drop rows with missing targets if required
-        if require_targets:
-            df = df.dropna(subset=['is_winner', 'is_top3', 'points'])
         
         logger.info(
             "training_data_loaded",
@@ -98,27 +89,19 @@ class F1ModelTrainer:
         
         return df
     
-    # Prepare feature matrix with scaling and imputation
-    def prepare_features(
-        self,
-        df: pd.DataFrame,
-        fit_scaler: bool = True
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[str]]:
-        
+    def prepare_features(self, df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[str]]:
+    
         available_features = [c for c in self.FEATURE_COLS if c in df.columns]
         
         X = df[available_features].copy()
-        
-        # Handle missing values - fill with median or 0
         X = X.fillna(X.median())
-        X = X.fillna(0)  # Fill any remaining NaN with 0
+        X = X.fillna(0)
         
-        # Target variables - ensure 1D arrays
         y_winner = df['is_winner'].values.ravel()
         y_top3 = df['is_top3'].values.ravel()
         y_points = df['points'].values.ravel()
         
-        # Time-based split (preserve order for time series)
+        # Split data (preserve time order)
         split_idx = int(len(df) * (1 - self.config.ml.test_size))
         
         X_train_raw = X.iloc[:split_idx]
@@ -131,52 +114,12 @@ class F1ModelTrainer:
         y_test_points = y_points[split_idx:]
         
         # Scale features
-        if fit_scaler:
-            X_train = self.scaler.fit_transform(X_train_raw)
-        else:
-            X_train = self.scaler.transform(X_train_raw)
-        
+        X_train = self.scaler.fit_transform(X_train_raw)
         X_test = self.scaler.transform(X_test_raw)
         
-        # Handle class imbalance with SMOTE for winner prediction
-        X_train_winner = X_train
-        y_train_winner_resampled = y_train_winner
-        
-        if len(np.unique(y_train_winner)) >= 2 and np.sum(y_train_winner) > 0:
-            try:
-                minority_count = np.sum(y_train_winner == 1)
-                k_neighbors = min(3, minority_count - 1) if minority_count > 1 else 1
-                
-                if k_neighbors >= 1:
-                    smote = SMOTE(random_state=self.random_state, k_neighbors=k_neighbors)
-                    X_train_winner, y_train_winner_resampled = smote.fit_resample(X_train, y_train_winner)
-                    logger.info(f"SMOTE applied for winner: {len(y_train_winner_resampled)} samples")
-                else:
-                    logger.warning("Not enough samples for SMOTE (winner)")
-            except Exception as e:
-                logger.warning(f"SMOTE failed for winner: {e}")
-        else:
-            logger.warning("Not enough positive samples for winner SMOTE")
-        
-        # Handle class imbalance for top3 prediction
-        X_train_top3 = X_train
-        y_train_top3_resampled = y_train_top3
-        
-        if len(np.unique(y_train_top3)) >= 2 and np.sum(y_train_top3) > 0:
-            try:
-                minority_count = np.sum(y_train_top3 == 1)
-                k_neighbors = min(3, minority_count - 1) if minority_count > 1 else 1
-                
-                if k_neighbors >= 1:
-                    smote = SMOTE(random_state=self.random_state, k_neighbors=k_neighbors)
-                    X_train_top3, y_train_top3_resampled = smote.fit_resample(X_train, y_train_top3)
-                    logger.info(f"SMOTE applied for top3: {len(y_train_top3_resampled)} samples")
-                else:
-                    logger.warning("Not enough samples for SMOTE (top3)")
-            except Exception as e:
-                logger.warning(f"SMOTE failed for top3: {e}")
-        else:
-            logger.warning("Not enough positive samples for top3 SMOTE")
+        # Apply SMOTE for class imbalance
+        X_train_winner, y_train_winner = self._apply_smote(X_train, y_train_winner, 'winner')
+        X_train_top3, y_train_top3 = self._apply_smote(X_train, y_train_top3, 'top3')
         
         logger.info(
             "features_prepared",
@@ -188,36 +131,42 @@ class F1ModelTrainer:
         return (
             X_train_winner, X_train_top3, X_train,
             X_test,
-            y_train_winner_resampled, y_test_winner,
-            y_train_top3_resampled, y_test_top3,
+            y_train_winner, y_test_winner,
+            y_train_top3, y_test_top3,
             y_train_points, y_test_points,
             available_features
         )
     
-    # Training baseline logistic regression model
-    def train_logistic_regression(
-        self,
-        X_train: np.ndarray,
-        y_train: np.ndarray,
-        target: str
-    ) -> LogisticRegression:
+    def _apply_smote(self, X: np.ndarray, y: np.ndarray, name: str) -> Tuple[np.ndarray, np.ndarray]:
+        
+        if len(np.unique(y)) >= 2 and np.sum(y) > 0:
+            try:
+                minority_count = np.sum(y == 1)
+                k_neighbors = min(3, minority_count - 1) if minority_count > 1 else 1
+                
+                if k_neighbors >= 1:
+                    smote = SMOTE(random_state=self.random_state, k_neighbors=k_neighbors)
+                    X_resampled, y_resampled = smote.fit_resample(X, y)
+                    logger.info(f"SMOTE applied for {name}: {len(y_resampled)} samples")
+                    return X_resampled, y_resampled
+            except Exception as e:
+                logger.warning(f"SMOTE failed for {name}: {e}")
+        
+        return X, y
+    
+    def train_logistic_regression(self, X_train: np.ndarray, y_train: np.ndarray, target: str) -> LogisticRegression:
+    
         model = LogisticRegression(
             random_state=self.random_state,
             max_iter=1000,
             class_weight='balanced'
         )
         model.fit(X_train, y_train)
-        
         logger.info("logistic_regression_trained", target=target)
         return model
     
-    # Random forest (ensemble)
-    def train_random_forest(
-        self,
-        X_train: np.ndarray,
-        y_train: np.ndarray,
-        target: str
-    ) -> RandomForestClassifier:
+    def train_random_forest(self, X_train: np.ndarray, y_train: np.ndarray, target: str) -> RandomForestClassifier:
+        
         model = RandomForestClassifier(
             n_estimators=100,
             max_depth=10,
@@ -227,21 +176,14 @@ class F1ModelTrainer:
             n_jobs=-1
         )
         model.fit(X_train, y_train)
-        
         logger.info("random_forest_trained", target=target)
         return model
     
-    # XGBoost training
-    def train_xgboost(
-        self,
-        X_train: np.ndarray,
-        y_train: np.ndarray,
-        target: str
-    ) -> Any:
+    def train_xgboost(self, X_train: np.ndarray, y_train: np.ndarray, target: str) -> Any:
+        
         try:
             import xgboost as xgb
             
-            # Calculate scale_pos_weight for imbalance
             scale_pos_weight = len(y_train[y_train == 0]) / max(len(y_train[y_train == 1]), 1)
             
             model = xgb.XGBClassifier(
@@ -255,23 +197,32 @@ class F1ModelTrainer:
                 use_label_encoder=False
             )
             model.fit(X_train, y_train)
-            
             logger.info("xgboost_trained", target=target)
             return model
-            
         except ImportError:
-            logger.warning("xgboost_not_installed")
+            logger.error("xgboost_not_installed")
             raise
     
-    # Comprehensive model evaluation
-    def evaluate_model(
-        self,
-        model: Any,
-        X_test: np.ndarray,
-        y_test: np.ndarray,
-        feature_names: List[str],
-        target: str
-    ) -> Dict[str, Any]:
+    def train_linear_regression(self, X_train: np.ndarray, y_train: np.ndarray) -> LinearRegression:
+        
+        model = LinearRegression()
+        model.fit(X_train, y_train)
+        logger.info("linear_regression_trained")
+        return model
+    
+    def train_random_forest_regressor(self, X_train: np.ndarray, y_train: np.ndarray) -> RandomForestRegressor:
+        
+        model = RandomForestRegressor(
+            n_estimators=100,
+            random_state=self.random_state,
+            n_jobs=-1
+        )
+        model.fit(X_train, y_train)
+        logger.info("random_forest_regressor_trained")
+        return model
+    
+    def evaluate_classifier(self, model: Any, X_test: np.ndarray, y_test: np.ndarray, feature_names: List[str], target: str) -> Dict[str, Any]:
+        
         y_pred = model.predict(X_test)
         y_prob = model.predict_proba(X_test)[:, 1] if hasattr(model, 'predict_proba') else None
         
@@ -291,33 +242,30 @@ class F1ModelTrainer:
             except ValueError:
                 metrics['roc_auc'] = None
         
-        # Feature importance
         if hasattr(model, 'feature_importances_'):
             importance = dict(zip(feature_names, model.feature_importances_.tolist()))
-            metrics['feature_importance'] = dict(
-                sorted(importance.items(), key=lambda x: x[1], reverse=True)[:10]
-            )
+            metrics['feature_importance'] = dict(sorted(importance.items(), key=lambda x: x[1], reverse=True)[:10])
         elif hasattr(model, 'coef_'):
             importance = dict(zip(feature_names, np.abs(model.coef_[0]).tolist()))
-            metrics['feature_importance'] = dict(
-                sorted(importance.items(), key=lambda x: x[1], reverse=True)[:10]
-            )
+            metrics['feature_importance'] = dict(sorted(importance.items(), key=lambda x: x[1], reverse=True)[:10])
         
         return metrics
     
-    # Model versioning & storage
-    def save_model(
-        self,
-        model: Any,
-        model_name: str,
-        target: str,
-        metrics: Dict[str, Any]
-    ) -> str:
+    def evaluate_regressor(self, model: Any, X_test: np.ndarray, y_test: np.ndarray) -> Dict[str, float]:
+    
+        y_pred = model.predict(X_test)
+        return {
+            'mae': mean_absolute_error(y_test, y_pred),
+            'rmse': np.sqrt(mean_squared_error(y_test, y_pred)),
+            'r2': r2_score(y_test, y_pred)
+        }
+    
+    def save_model(self, model: Any, model_name: str, target: str, metrics: Dict[str, Any]) -> str:
+        
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         filename = f"{model_name}_{target}_{timestamp}.pkl"
         path = self.model_dir / filename
         
-        # Save model
         with open(path, 'wb') as f:
             pickle.dump({
                 'model': model,
@@ -325,7 +273,7 @@ class F1ModelTrainer:
                 'feature_names': self.FEATURE_COLS,
                 'metrics': metrics,
                 'timestamp': timestamp,
-                'version': '1.0.0'
+                'version': '2.0.0'
             }, f)
         
         # Save metrics separately
@@ -333,128 +281,82 @@ class F1ModelTrainer:
         with open(metrics_path, 'w') as f:
             json.dump(metrics, f, indent=2, default=str)
         
-        logger.info(
-            "model_saved",
-            path=str(path),
-            model=model_name,
-            target=target,
-            accuracy=metrics.get('accuracy')
-        )
-        
+        logger.info("model_saved", path=str(path), model=model_name, target=target)
         return str(path)
     
-    # Train winner prediction models
-    def train_winner_models(
-        self,
-        X_train: np.ndarray,
-        X_test: np.ndarray,
-        y_train: np.ndarray,
-        y_test: np.ndarray,
-        feature_names: List[str]
-    ) -> Dict[str, Any]:
+    def train_winner_models(self, X_train: np.ndarray, X_test: np.ndarray, y_train: np.ndarray, y_test: np.ndarray, feature_names: List[str]) -> Dict[str, Any]:
+        
         results = {}
         
         # Logistic Regression
         lr = self.train_logistic_regression(X_train, y_train, 'winner')
-        lr_metrics = self.evaluate_model(lr, X_test, y_test, feature_names, 'winner')
-        results['logistic_regression'] = lr_metrics
+        lr_metrics = self.evaluate_classifier(lr, X_test, y_test, feature_names, 'winner')
+        lr_path = self.save_model(lr, 'logistic_regression', 'winner', lr_metrics)
+        results['logistic_regression'] = {'model': lr, 'metrics': lr_metrics, 'path': lr_path}
         
         # Random Forest
         rf = self.train_random_forest(X_train, y_train, 'winner')
-        rf_metrics = self.evaluate_model(rf, X_test, y_test, feature_names, 'winner')
-        results['random_forest'] = rf_metrics
+        rf_metrics = self.evaluate_classifier(rf, X_test, y_test, feature_names, 'winner')
+        rf_path = self.save_model(rf, 'random_forest', 'winner', rf_metrics)
+        results['random_forest'] = {'model': rf, 'metrics': rf_metrics, 'path': rf_path}
         
         # XGBoost
         try:
             xgb = self.train_xgboost(X_train, y_train, 'winner')
-            xgb_metrics = self.evaluate_model(xgb, X_test, y_test, feature_names, 'winner')
-            results['xgboost'] = xgb_metrics
+            xgb_metrics = self.evaluate_classifier(xgb, X_test, y_test, feature_names, 'winner')
+            xgb_path = self.save_model(xgb, 'xgboost', 'winner', xgb_metrics)
+            results['xgboost'] = {'model': xgb, 'metrics': xgb_metrics, 'path': xgb_path}
         except Exception as e:
             logger.error("xgboost_training_failed", target='winner', error=str(e))
         
         return results
     
-    # Train top3 prediction models
-    def train_top3_models(
-        self,
-        X_train: np.ndarray,
-        X_test: np.ndarray,
-        y_train: np.ndarray,
-        y_test: np.ndarray,
-        feature_names: List[str]
-    ) -> Dict[str, Any]:
+    def train_top3_models(self, X_train: np.ndarray, X_test: np.ndarray, y_train: np.ndarray, y_test: np.ndarray, feature_names: List[str]) -> Dict[str, Any]:
+        
         results = {}
         
-        # Logistic Regression
         lr = self.train_logistic_regression(X_train, y_train, 'top3')
-        lr_metrics = self.evaluate_model(lr, X_test, y_test, feature_names, 'top3')
-        results['logistic_regression'] = lr_metrics
+        lr_metrics = self.evaluate_classifier(lr, X_test, y_test, feature_names, 'top3')
+        lr_path = self.save_model(lr, 'logistic_regression', 'top3', lr_metrics)
+        results['logistic_regression'] = {'model': lr, 'metrics': lr_metrics, 'path': lr_path}
         
-        # Random Forest
         rf = self.train_random_forest(X_train, y_train, 'top3')
-        rf_metrics = self.evaluate_model(rf, X_test, y_test, feature_names, 'top3')
-        results['random_forest'] = rf_metrics
+        rf_metrics = self.evaluate_classifier(rf, X_test, y_test, feature_names, 'top3')
+        rf_path = self.save_model(rf, 'random_forest', 'top3', rf_metrics)
+        results['random_forest'] = {'model': rf, 'metrics': rf_metrics, 'path': rf_path}
         
-        # XGBoost
         try:
             xgb = self.train_xgboost(X_train, y_train, 'top3')
-            xgb_metrics = self.evaluate_model(xgb, X_test, y_test, feature_names, 'top3')
-            results['xgboost'] = xgb_metrics
+            xgb_metrics = self.evaluate_classifier(xgb, X_test, y_test, feature_names, 'top3')
+            xgb_path = self.save_model(xgb, 'xgboost', 'top3', xgb_metrics)
+            results['xgboost'] = {'model': xgb, 'metrics': xgb_metrics, 'path': xgb_path}
         except Exception as e:
             logger.error("xgboost_training_failed", target='top3', error=str(e))
         
         return results
     
-    # Train points prediction models (regression)
-    def train_points_models(
-        self,
-        X_train: np.ndarray,
-        X_test: np.ndarray,
-        y_train: np.ndarray,
-        y_test: np.ndarray,
-        feature_names: List[str]
-    ) -> Dict[str, Any]:
-        from sklearn.ensemble import RandomForestRegressor
-        from sklearn.linear_model import LinearRegression
+    def train_points_models(self, X_train: np.ndarray, X_test: np.ndarray, y_train: np.ndarray, y_test: np.ndarray) -> Dict[str, Any]:
         
         results = {}
         
-        # Linear Regression
-        lr = LinearRegression()
-        lr.fit(X_train, y_train)
-        y_pred = lr.predict(X_test)
-        from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-        lr_metrics = {
-            'mae': mean_absolute_error(y_test, y_pred),
-            'rmse': np.sqrt(mean_squared_error(y_test, y_pred)),
-            'r2': r2_score(y_test, y_pred)
-        }
-        results['linear_regression'] = lr_metrics
+        lr = self.train_linear_regression(X_train, y_train)
+        lr_metrics = self.evaluate_regressor(lr, X_test, y_test)
+        lr_path = self.save_model(lr, 'linear_regression', 'points', lr_metrics)
+        results['linear_regression'] = {'model': lr, 'metrics': lr_metrics, 'path': lr_path}
         
-        # Random Forest Regressor
-        rf = RandomForestRegressor(n_estimators=100, random_state=self.random_state, n_jobs=-1)
-        rf.fit(X_train, y_train)
-        y_pred = rf.predict(X_test)
-        rf_metrics = {
-            'mae': mean_absolute_error(y_test, y_pred),
-            'rmse': np.sqrt(mean_squared_error(y_test, y_pred)),
-            'r2': r2_score(y_test, y_pred)
-        }
-        results['random_forest'] = rf_metrics
+        rf = self.train_random_forest_regressor(X_train, y_train)
+        rf_metrics = self.evaluate_regressor(rf, X_test, y_test)
+        rf_path = self.save_model(rf, 'random_forest', 'points', rf_metrics)
+        results['random_forest'] = {'model': rf, 'metrics': rf_metrics, 'path': rf_path}
         
         return results
     
-    def train_all_models(
-        self,
-        years: List[int] = [2020, 2021, 2022, 2023, 2024, 2025]
-    ) -> Dict[str, Dict[str, Any]]:
+    def train_all_models(self, years: List[int] = [2020, 2021, 2022, 2023, 2024, 2025]) -> Dict[str, Dict[str, Any]]:
         
         self.metrics.start()
         
-        # Load data
         df = self.load_training_data(years)
         
-        # Prepare features (returns 11 values)
         (X_train_winner, X_train_top3, X_train_points,
          X_test,
          y_train_winner, y_test_winner,
@@ -464,25 +366,22 @@ class F1ModelTrainer:
         
         results = {}
         
-        # Train winner prediction models
         logger.info("Training winner prediction models...")
         results['is_winner'] = self.train_winner_models(
             X_train_winner, X_test, y_train_winner, y_test_winner, feature_names
         )
         
-        # Train top3 prediction models
         logger.info("Training top3 prediction models...")
         results['is_top3'] = self.train_top3_models(
             X_train_top3, X_test, y_train_top3, y_test_top3, feature_names
         )
         
-        # Train points prediction models
         logger.info("Training points prediction models...")
         results['points'] = self.train_points_models(
-            X_train_points, X_test, y_train_points, y_test_points, feature_names
+            X_train_points, X_test, y_train_points, y_test_points
         )
         
-        pipeline_metrics = self.metrics.finalize()
-        logger.info("training_pipeline_complete", metrics=pipeline_metrics)
+        self.metrics.finalize()
+        logger.info("training_pipeline_complete")
         
         return results
