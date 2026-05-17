@@ -204,6 +204,228 @@ formula1-race-prediction-project/
 
 ---
 
+## Architecture
+
+High-level flow:
+
+1. **Data ingestion** (`src/ingestion/*`) pulls raw F1 data.
+2. **Processing + feature engineering** (`src/processing`, `src/features`) creates training datasets.
+3. **Model training/evaluation** (`src/models`) generates artifacts and metrics.
+4. **Prediction service** (`src/services/prediction_service.py`) loads models and performs inference.
+5. **FastAPI app** (`src/api`) exposes auth/data/prediction/health endpoints.
+6. **React frontend** (`src/frontend`) consumes API and renders analytics UI.
+
+---
+
+## Data Pipeline
+
+The platform implements a **layered data architecture** with strict separation between raw, processed, and feature data. All transformations are deterministic, reproducible, and time-aware to prevent data leakage.
+
+---
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         DATA SOURCES                                    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────────────┐ │
+│  │ Ergast API  │  │ OpenF1 API  │  │ FastF1 Python Library           │ │
+│  │ (2021-2025) │  │ (2026 Live) │  │ (Telemetry, Weather, Sessions)  │ │
+│  └──────┬──────┘  └──────┬──────┘  └─────────────┬───────────────────┘ │
+│         └──────────────────┴───────────────────────┘                      │
+└─────────────────────────────────────────────────────────────────────────┘
+↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      INGESTION LAYER (src/ingestion/)                   │
+│                                                                         │
+│  • ErgastIngestor    — Paginated API fetching with exponential backoff  │
+│  • OpenF1Ingestor    — Rate-limited requests, circuit breaker pattern   │
+│  • FastF1Ingestor    — Library wrapper with local caching               │
+│                                                                         │
+│  Outputs: data/raw/{source}/{timestamp}.parquet                         │
+│  Schema validation, idempotency checks, structured logging per batch    │
+└─────────────────────────────────────────────────────────────────────────┘
+↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      PROCESSING LAYER (src/processing/)                 │
+│                                                                         │
+│  DataCleaner responsibilities:                                          │
+│  • Schema normalization (column names, dtypes, UTC timestamps)          │
+│  • Key reconciliation (source IDs → canonical DB IDs)                   │
+│  • Lap time standardization → milliseconds                              │
+│  • Duplicate removal via composite keys                                 │
+│  • Missing value imputation (numeric: median/group; categorical: Unknown)│
+│                                                                         │
+│  Outputs: data/processed/{entity}.parquet + validation reports          │
+└─────────────────────────────────────────────────────────────────────────┘
+↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│                   FEATURE ENGINEERING (src/features/)                   │
+│                                                                         │
+│  FeatureBuilder — anti-leakage guarantee:                               │
+│  • Rolling windows computed ONLY from races before target date          │
+│  • Driver performance index (points × finish × consistency)             │
+│  • Constructor strength (team reliability, dual-car scoring)            │
+│  • Track-specific history (experience, best finish, average points)     │
+│  • Qualifying impact (gap to pole, grid gain potential)                 │
+│  • DNF probability (mechanical vs crash trends)                         │
+│                                                                         │
+│  Outputs: PostgreSQL driver_race_features table + artifacts/            │
+└─────────────────────────────────────────────────────────────────────────┘
+↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      STORAGE ARCHITECTURE                               │
+│                                                                         │
+│  ┌─────────────────────┐  ┌──────────────────────────────────────────┐ │
+│  │  RAW LAYER          │  │  RELATIONAL LAYER (Supabase PostgreSQL)  │ │
+│  │  data/raw/          │  │  • races, drivers, constructors          │ │
+│  │  Parquet (zstd)     │  │  • results, lap_times, pit_stops         │ │
+│  │  Immutable, append  │  │  • qualifying, telemetry_summary         │ │
+│  │  Partitioned by     │  │  • driver_race_features (ML features)    │ │
+│  │  source + date      │  │  • pipeline_runs (audit/lineage)         │ │
+│  └─────────────────────┘  └──────────────────────────────────────────┘ │
+│                                                                         │
+│  Design principles:                                                     │
+│  • Telemetry-heavy data stays in Parquet (not DB)                      │
+│  • PostgreSQL handles structured, query-heavy analytical data            │
+│  • RLS policies on feature tables for multi-tenant access                │
+│  • Audit timestamps on all tables (created_at, updated_at)               │
+│  • Alembic-ready structure for future migrations                         │
+└─────────────────────────────────────────────────────────────────────────┘
+↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      DATA ACCESS PATTERNS                               │
+│                                                                         │
+│  ┌────────────────────────────────────────────────────────────────────┐ │
+│  │  API Layer (src/api/routes/data.py)                                │ │
+│  │  • /data/drivers        — list/filter by season                    │ │
+│  │  • /data/races          — season calendar with circuit info        │ │
+│  │  • /data/constructors   — team listings                            │ │
+│  │  • /data/standings/{year} — championship tables                    │ │
+│  └────────────────────────────────────────────────────────────────────┘ │
+│                                                                         │
+│  ┌────────────────────────────────────────────────────────────────────┐ │
+│  │  ML Service (src/services/prediction_service.py)                   │ │
+│  │  • Loads pre-trained models from artifacts/models/                 │ │
+│  │  • Fetches features via SQL (time-bounded, no leakage)             │ │
+│  │  • Scales features, generates predictions + confidence tiers       │ │
+│  │  • Returns structured response with feature contributions          │ │
+│  └────────────────────────────────────────────────────────────────────┘ │
+│                                                                         │
+│  ┌────────────────────────────────────────────────────────────────────┐ │
+│  │  Notebooks (notebooks/) — Read-only analytical access              │ │
+│  │  • 01_eda.ipynb — Season distributions, geography, trends          │ │
+│  │  • 02_feature_analysis.ipynb — Correlation, leakage checks         │ │
+│  │  • 03_model_experiments.ipynb — Training, comparison, selection    │ │
+│  │  • 04_prediction_analysis.ipynb — Race-level prediction review     │ │
+│  │  • 05_model_explainability.ipynb — SHAP values, interpretation     │ │
+│  └────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+---
+
+### Ingestion Layer
+
+Three independent ingestors implement the `BaseIngestor` interface:
+
+```
+| Ingestor | Source | Data | Frequency | Key Features |
+|----------|--------|------|-----------|--------------|
+| `ErgastIngestor` | Ergast API | Historical results (2021-2025) | Batch (seasonal) | Auto-pagination, rate limiting, retry with exponential backoff |
+| `OpenF1Ingestor` | OpenF1 API | Live session data (2026) | Real-time / per-session | Circuit breaker, 5-retry policy, streaming-ready hooks |
+| `FastF1Ingestor` | FastF1 lib | Lap times, weather, telemetry | Per-race | Local caching, deterministic loading, session types (R/Q/FP) |
+
+```
+
+All ingestors produce:
+- **Parquet files** in `data/raw/{source}/` with zstd compression
+- **Structured logs** with record counts, validation status, file paths
+- **Idempotent loads** — same data re-ingested produces identical files
+
+### Processing Layer
+
+The `DataCleaner` enforces:
+
+1. **Schema normalization** — canonical column names, Pydantic-validated types, UTC timestamps
+2. **Key reconciliation** — maps source identifiers (e.g., `driver_ref`) to database primary keys
+3. **Time standardization** — all lap times converted to milliseconds; race dates normalized to UTC
+4. **Deduplication** — composite key-based (`year`, `round`, `driver_id`) with `keep='last'`
+5. **Imputation** — numeric via group median (grouped by year/round/driver), categorical as `"Unknown"`
+
+Each run generates a **validation report** with null percentages, type checks, and row counts.
+
+### Feature Engineering Layer
+
+The `FeatureBuilder` guarantees **zero data leakage** through strict temporal boundaries:
+
+For race R on date D:
+Historical data = all races where date < D
+Rolling features = computed from historical data only
+Target variables = derived from race R results (not used in features)
+
+---
+
+Feature categories:
+
+```
+
+| Category | Features | Window |
+|----------|----------|--------|
+| Driver rolling | `rolling_avg_points_5r`, `rolling_avg_finish_pos_5r`, `rolling_points_trend` | Last 5 races |
+| Recent form | `recent_form_points`, `recent_form_finish_pos`, `recent_form_quali_pos` | Last 3 races |
+| Constructor | `constructor_avg_points_5r`, `constructor_reliability_score` | Last 5 races (team aggregate) |
+| Track-specific | `track_avg_points`, `track_best_finish_pos`, `track_experience_races` | All time at circuit |
+| Qualifying | `quali_position`, `quali_gap_to_pole_ms`, `grid_position_gain_potential` | Current race only |
+| Reliability | `dnf_probability`, `consecutive_finishes`, `mechanical_dnf_rate` | Historical trend |
+| Composite | `driver_performance_index`, `constructor_performance_index`, `overall_strength_index` | Weighted combinations |
+
+```
+
+Features are stored in PostgreSQL with `UNIQUE(race_id, driver_id)` constraint and RLS policies.
+
+### Storage Architecture
+
+```
+
+| Layer | Format | Location | Purpose |
+|-------|--------|----------|---------|
+| Raw | Parquet (zstd) | `data/raw/{source}/` | Immutable ingestion archive |
+| Processed | Parquet (zstd) | `data/processed/` | Cleaned, deduplicated data |
+| Features | PostgreSQL | `driver_race_features` table | ML-ready, query-optimized |
+| Models | Pickle (.pkl) | `artifacts/models/` | Serialized estimators + scalers |
+| Metrics | JSON | `artifacts/metrics/` | Evaluation reports, feature importance |
+
+``` 
+
+**PostgreSQL Schema** (`sql/schema_postgres.sql`):
+
+- Normalized tables: `circuits`, `constructors`, `drivers`, `races`, `results`, `lap_times`, `pit_stops`, `qualifying`
+- Feature table: `driver_race_features` (25+ engineered columns)
+- Audit table: `pipeline_runs` (UUID, timestamps, record counts, error tracking)
+- Views: `v_driver_standings`, `v_constructor_standings` for quick analytics
+- Triggers: Auto-update `updated_at` on all transactional tables
+- RLS: Row-level security enabled on feature tables with public/service-role separation
+
+### Data Access Patterns
+
+```
+
+| Consumer | Method | Path |
+|----------|--------|------|
+| ML Training | SQLAlchemy + pandas | `SELECT ... FROM driver_race_features JOIN races` |
+| API Endpoints | SQLAlchemy sessions | Parameterized queries via `src/utils/db.py` |
+| Notebooks | Direct SQL + pandas | `db.execute_dataframe(query)` |
+| Frontend | HTTP/REST | FastAPI → PostgreSQL (never direct DB access) |
+
+``` 
+
+All database access is centralized in `src/utils/db.py` with:
+- Connection pooling (QueuePool, 10-20 connections)
+- SSL mode required
+- Parameterized queries only (SQL injection prevention)
+- Auto-commit/rollback with context managers
+
+---
+
+
 ## Getting Started
 
 ### Prerequisites
