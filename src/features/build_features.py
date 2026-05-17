@@ -35,7 +35,7 @@ class FeatureBuilder:
         SELECT 
             r.race_id, r.year, r.round, r.date as race_date, r.circuit_id,
             res.driver_id, res.constructor_id, res.grid, res.position_order,
-            res.points, res.laps, res.milliseconds, res.status,
+            res.points, res.laps, res.milliseconds, res.status_id,
             d.driver_ref, c.constructor_ref,
             ci.circuit_ref, ci.country as circuit_country
         FROM results res
@@ -43,6 +43,7 @@ class FeatureBuilder:
         JOIN drivers d ON res.driver_id = d.driver_id
         JOIN constructors c ON res.constructor_id = c.constructor_id
         JOIN circuits ci ON r.circuit_id = ci.circuit_id
+    LEFT JOIN status s ON res.status_id = s.status_id
         WHERE r.date < :cutoff_date
         ORDER BY r.date DESC
         """

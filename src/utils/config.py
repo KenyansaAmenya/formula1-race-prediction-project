@@ -7,12 +7,10 @@ import yaml
 from pydantic import Field, SecretStr, validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 class Environment(str, Enum):
     DEVELOPMENT = "development"
     STAGING = "staging"
     PRODUCTION = "production"
-
 
 class DatabaseConfig(BaseSettings):
     model_config = SettingsConfigDict(
@@ -70,7 +68,6 @@ class OpenF1Config(BaseSettings):
     timeout: int = 45
     rate_limit: float = 2.0
 
-
 class FastF1Config(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="FASTF1_", extra="allow")
     
@@ -78,14 +75,12 @@ class FastF1Config(BaseSettings):
     retry_attempts: int = 3
     timeout: int = 60
 
-
 class IngestionConfig(BaseSettings):
     model_config = SettingsConfigDict(extra="allow")
     
     ergast: ErgastConfig = Field(default_factory=ErgastConfig)
     openf1: OpenF1Config = Field(default_factory=OpenF1Config)
     fastf1: FastF1Config = Field(default_factory=FastF1Config)
-
 
 class StorageConfig(BaseSettings):
     model_config = SettingsConfigDict(extra="allow")
@@ -110,6 +105,37 @@ class SecurityConfig(BaseSettings):
     max_query_limit: int = 10000
     enable_rls: bool = True
 
+class MLConfig(BaseSettings):
+    model_config = SettingsConfigDict(extra="allow")
+    
+    model_dir: str = Field(default="./artifacts/models")
+    metrics_dir: str = Field(default="./artifacts/metrics")
+    random_state: int = Field(default=42)
+    test_size: float = Field(default=0.2)
+    validation_size: float = Field(default=0.1)
+    
+    targets: List[str] = Field(default=["is_winner", "is_top3", "points"])
+    
+    models: Dict[str, List[str]] = Field(default={
+        "baseline": ["logistic_regression"],
+        "advanced": ["random_forest", "xgboost"]
+    })
+    
+    hyperparameters: Dict[str, Dict[str, List]] = Field(default={
+        "random_forest": {
+            "n_estimators": [100, 200],
+            "max_depth": [10, 20, None],
+            "min_samples_split": [2, 5]
+        },
+        "xgboost": {
+            "n_estimators": [100, 200],
+            "max_depth": [3, 6, 9],
+            "learning_rate": [0.01, 0.1],
+            "subsample": [0.8, 1.0]
+        }
+    })
+
+
 class AppConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -126,6 +152,7 @@ class AppConfig(BaseSettings):
     storage: StorageConfig = Field(default_factory=StorageConfig)
     features: FeatureConfig = Field(default_factory=FeatureConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
+    ml: MLConfig = Field(default_factory=MLConfig)  # ADD THIS LINE
     
     @classmethod
     def from_yaml(cls, config_path: str = "config/settings.yaml") -> "AppConfig":
