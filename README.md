@@ -223,7 +223,7 @@ The platform implements a **layered data architecture** with strict separation b
 
 ---
 
-```
+``` Text
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         DATA SOURCES                                    │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────────────┐ │
@@ -326,14 +326,14 @@ The platform implements a **layered data architecture** with strict separation b
 
 Three independent ingestors implement the `BaseIngestor` interface:
 
-```
+(
 | Ingestor | Source | Data | Frequency | Key Features |
 |----------|--------|------|-----------|--------------|
 | `ErgastIngestor` | Ergast API | Historical results (2021-2025) | Batch (seasonal) | Auto-pagination, rate limiting, retry with exponential backoff |
 | `OpenF1Ingestor` | OpenF1 API | Live session data (2026) | Real-time / per-session | Circuit breaker, 5-retry policy, streaming-ready hooks |
 | `FastF1Ingestor` | FastF1 lib | Lap times, weather, telemetry | Per-race | Local caching, deterministic loading, session types (R/Q/FP) |
 
-```
+)
 
 All ingestors produce:
 - **Parquet files** in `data/raw/{source}/` with zstd compression
@@ -365,7 +365,7 @@ Target variables = derived from race R results (not used in features)
 
 Feature categories:
 
-```
+(
 
 | Category | Features | Window |
 |----------|----------|--------|
@@ -377,13 +377,13 @@ Feature categories:
 | Reliability | `dnf_probability`, `consecutive_finishes`, `mechanical_dnf_rate` | Historical trend |
 | Composite | `driver_performance_index`, `constructor_performance_index`, `overall_strength_index` | Weighted combinations |
 
-```
+)
 
 Features are stored in PostgreSQL with `UNIQUE(race_id, driver_id)` constraint and RLS policies.
 
 ### Storage Architecture
 
-```
+(
 
 | Layer | Format | Location | Purpose |
 |-------|--------|----------|---------|
@@ -393,7 +393,7 @@ Features are stored in PostgreSQL with `UNIQUE(race_id, driver_id)` constraint a
 | Models | Pickle (.pkl) | `artifacts/models/` | Serialized estimators + scalers |
 | Metrics | JSON | `artifacts/metrics/` | Evaluation reports, feature importance |
 
-``` 
+)
 
 **PostgreSQL Schema** (`sql/schema_postgres.sql`):
 
@@ -406,16 +406,14 @@ Features are stored in PostgreSQL with `UNIQUE(race_id, driver_id)` constraint a
 
 ### Data Access Patterns
 
-```
-
-| Consumer | Method | Path |
+(
+  | Consumer | Method | Path |
 |----------|--------|------|
 | ML Training | SQLAlchemy + pandas | `SELECT ... FROM driver_race_features JOIN races` |
 | API Endpoints | SQLAlchemy sessions | Parameterized queries via `src/utils/db.py` |
 | Notebooks | Direct SQL + pandas | `db.execute_dataframe(query)` |
 | Frontend | HTTP/REST | FastAPI → PostgreSQL (never direct DB access) |
-
-``` 
+)
 
 All database access is centralized in `src/utils/db.py` with:
 - Connection pooling (QueuePool, 10-20 connections)
@@ -808,7 +806,7 @@ class DatabaseConfig(BaseSettings):
     password: SecretStr = Field(default=SecretStr(""), description="Database password")
     ssl_mode: str = Field(default="require", description="SSL mode for connections")
 ```
-```Table
+(
 | Feature                  | What It Does                                                                   | Why It Matters                                               |
 | ------------------------ | ------------------------------------------------------------------------------ | ------------------------------------------------------------ |
 | `SecretStr`              | Passwords are stored as encrypted strings, never printed in logs or tracebacks | Prevents accidental credential leakage in debugging          |
@@ -816,7 +814,7 @@ class DatabaseConfig(BaseSettings):
 | `SettingsConfigDict`     | Strict validation — extra fields rejected                                      | Typo in `.env` fails fast instead of silently using defaults |
 | `.env` file loading      | Secrets loaded from file, never hardcoded                                      | Developers can't accidentally commit credentials             |
 | Environment substitution | `${VAR:-default}` syntax in YAML                                               | Same config works across dev/staging/prod                    |
-```
+)
 
 ---
 
@@ -828,14 +826,14 @@ DB_PASSWORD=your_secure_password_here
 JWT_SECRET_KEY=your-super-secret-jwt-key-min-32-chars-long
 ```
 
-```Table
+(
 | Feature                      | What It Does                                | Why It Matters                                |
 | ---------------------------- | ------------------------------------------- | --------------------------------------------- |
 | `.env` in `.gitignore`       | Prevents accidental commit of secrets       | Most common credential leak vector eliminated |
 | `.env.example`               | Documents required variables without values | New developers know what to configure         |
 | `JWT_SECRET_KEY` requirement | Minimum 32 chars enforced                   | Short secrets vulnerable to brute force       |
 
-```
+)
 
 ---
 
@@ -856,14 +854,14 @@ self._engine = create_engine(
 )
 
 ```
-```Table
+(
 | Feature                 | What It Does                         | Why It Matters                                               |
 | ----------------------- | ------------------------------------ | ------------------------------------------------------------ |
 | `sslmode=require`       | Rejects any connection not using TLS | Prevents man-in-the-middle attacks on database traffic       |
 | `pool_pre_ping=True`    | Validates connection before use      | Prevents using stale/broken connections that could leak data |
 | `QueuePool` with limits | Max 10 connections, overflow 20      | Prevents connection exhaustion DoS                           |
 | `pool_recycle=1800`     | Recycles connections every 30 min    | Limits window for session hijacking                          |
-```
+)
 
 Parameterized Queries Only
 ```Python
@@ -876,13 +874,13 @@ query = f"SELECT * FROM drivers WHERE driver_id = {driver_id}"  # SQL INJECTION!
 
 ```
 
-```Table
+(
 | Feature                               | What It Does                            | Why It Matters                                               |
 | ------------------------------------- | --------------------------------------- | ------------------------------------------------------------ |
 | `sqlalchemy.text()` with named params | Database driver escapes all inputs      | SQL injection impossible — #1 OWASP vulnerability eliminated |
 | Centralized `DatabaseManager`         | All queries go through one audited path | Can't accidentally use unsafe queries in new code            |
 
-```
+)
 
 ---
 
@@ -908,7 +906,7 @@ CREATE POLICY driver_race_features_service_role ON driver_race_features
 
 ```
 
-```Table
+(
 
 | Feature                               | What It Does                                | Why It Matters                                                |
 | ------------------------------------- | ------------------------------------------- | ------------------------------------------------------------- |
@@ -916,7 +914,7 @@ CREATE POLICY driver_race_features_service_role ON driver_race_features
 | `public` vs `service_role` separation | Frontend users ≠ backend service accounts   | Compromised frontend key can't modify data                    |
 | `FOR SELECT` only on public           | Write operations blocked for public role    | Read-only API keys can't corrupt data                         |
 
-```
+)
 
 ## 4. API SECURITY (FastAPI Backend)
 
@@ -937,22 +935,22 @@ def create_access_token(self, user_id: str, role: str = "user") -> str:
 
 ```
 
-```Table
+(
 | Feature           | What It Does                             | Why It Matters                            |
 | ----------------- | ---------------------------------------- | ----------------------------------------- |
 | `exp` claim       | Token expires after 30 minutes           | Stolen tokens become useless quickly      |
 | `type: "access"`  | Distinguishes access from refresh tokens | Refresh tokens can't access API endpoints |
 | `role` claim      | Embedded RBAC in token                   | No database lookup needed per request     |
 | `HS256` algorithm | Symmetric key signing                    | Fast, stateless verification              |
-```
+)
 
 API Key Authentication (Service-to-Service)
-```Table
+(
 | Feature                 | What It Does                     | Why It Matters                                            |
 | ----------------------- | -------------------------------- | --------------------------------------------------------- |
 | `hmac.compare_digest()` | Compares hashes in constant time | Timing attacks can't guess API key character-by-character |
 | SHA-256 hashing         | Keys never stored plaintext      | Database breach doesn't expose keys                       |
-```
+)
 
 ---
 
@@ -974,13 +972,13 @@ class RateLimiter:
         return True
 ```
 
-```Table
+(
 | Feature                    | What It Does                                             | Why It Matters                                          |
 | -------------------------- | -------------------------------------------------------- | ------------------------------------------------------- |
 | Per-IP + endpoint tracking | `192.168.1.1:/predict` separate from `192.168.1.1:/data` | Legitimate users of one endpoint not blocked by another |
 | 60-second sliding window   | Old requests expire automatically                        | Prevents memory exhaustion                              |
 | `429 TOO_MANY_REQUESTS`    | Standard HTTP status                                     | Clients know to back off                                |
-```
+)
 
 Role-Based Access Control (RBAC)
 
@@ -1002,13 +1000,13 @@ async def require_role(required_role: str):
 
 ```
 
-```Table
+(
 | Feature                               | What It Does                                           | Why It Matters                                    |
 | ------------------------------------- | ------------------------------------------------------ | ------------------------------------------------- |
 | Hierarchical roles                    | `admin` (3) > `analyst` (2) > `user` (1)               | Granular permission without complex ACLs          |
 | `service` role parity with `admin`    | Backend services have full access                      | Microservice communication not blocked            |
 | `403 FORBIDDEN` vs `401 UNAUTHORIZED` | 401 = not logged in, 403 = logged in but no permission | Clear error for debugging, no information leakage |
-```
+)
 
 ---
 
@@ -1044,7 +1042,7 @@ api.interceptors.response.use(
 
 ```
 
-```Table
+(
 | Feature                           | What It Does                    | Why It Matters                               |
 | --------------------------------- | ------------------------------- | -------------------------------------------- |
 | `localStorage` for tokens         | Persists across page reloads    | User not logged out on refresh               |
@@ -1052,7 +1050,7 @@ api.interceptors.response.use(
 | Auto-refresh on 401               | Silent token renewal            | User experience uninterrupted                |
 | `_retry` flag                     | Prevents infinite refresh loops | Broken refresh token redirects to login once |
 
-```
+)
 
 ---
 
