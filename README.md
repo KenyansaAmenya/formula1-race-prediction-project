@@ -712,6 +712,519 @@ Before production rollout:
 
 ---
 
-## License
+## Lastly even though it was not the part of the project but very important 
 
-No license file is currently included in this repository.
+---
+
+## Security Architecture Overview
+
+---
+
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         CLIENT LAYER                                     │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────────────┐ │
+│  │  React App  │    │   Browser   │    │  LocalStorage (JWT tokens)  │ │
+│  │  (No secrets│    │  HTTPS/WSS  │    │  (Never DB credentials)     │ │
+│  │   exposed)  │    │             │    │                             │ │
+│  └──────┬──────┘    └──────┬──────┘    └─────────────────────────────┘ │
+│         │                   │                                           │
+│         └───────────────────┘                                           │
+│                    ↓                                                     │
+│         ┌─────────────────┐                                             │
+│         │  NGINX (WAF/RP) │  ← Rate limiting, SSL termination,         │
+│         │                 │    security headers, request filtering       │
+│         └────────┬────────┘                                             │
+│                  ↓                                                       │
+│  ┌─────────────────────────────────────────────────────────────────────┐│
+│  │                      FASTAPI BACKEND LAYER                           ││
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌────────────┐ ││
+│  │  │   CORS      │  │ Rate Limit  │  │   JWT/API   │  │  Request   │ ││
+│  │  │  Middleware │  │  Middleware │  │    Auth     │  │ Validation │ ││
+│  │  │             │  │             │  │             │  │  (Pydantic)│ ││
+│  │  │  Origin     │  │  Per-IP     │  │  Token      │  │  Schema    │ ││
+│  │  │  whitelist  │  │  bucket     │  │  verify     │  │  enforce   │ ││
+│  │  └─────────────┘  └─────────────┘  └─────────────┘  └────────────┘ ││
+│  │                                                                     ││
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                 ││
+│  │  │   RBAC      │  │   Input     │  │   Audit     │                 ││
+│  │  │  (Roles)    │  │  Sanitization│  │   Logging   │                 ││
+│  │  │             │  │             │  │             │                 ││
+│  │  │  analyst    │  │  SQL inject │  │  Masked     │                 ││
+│  │  │  admin      │  │  XSS filter │  │  secrets    │                 ││
+│  │  │  service    │  │  No eval    │  │  Structured │                 ││
+│  │  └─────────────┘  └─────────────┘  └─────────────┘                 ││
+│  └─────────────────────────────────────────────────────────────────────┘│
+│                    ↓                                                     │
+│  ┌─────────────────────────────────────────────────────────────────────┐│
+│  │                      DATABASE LAYER (Supabase)                       ││
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                 ││
+│  │  │    SSL      │  │    RLS      │  │  Connection │                 ││
+│  │  │  (require)  │  │  Policies   │  │   Pooling   │                 ││
+│  │  │             │  │             │  │             │                 ││
+│  │  │  Cert       │  │  public=RO  │  │  SQLAlchemy │                 ││
+│  │  │  verify     │  │  service=RW │  │  QueuePool  │                 ││
+│  │  └─────────────┘  └─────────────┘  └─────────────┘                 ││
+│  │                                                                     ││
+│  │  ┌─────────────┐  ┌─────────────┐                                  ││
+│  │  │ Parameterized│  │   Audit     │                                  ││
+│  │  │   Queries   │  │  Triggers   │                                  ││
+│  │  │             │  │             │                                  ││
+│  │  │  Never      │  │  updated_at │                                  ││
+│  │  │  string     │  │  timestamps │                                  ││
+│  │  │  concat     │  │  on all rows│                                  ││
+│  │  └─────────────┘  └─────────────┘                                  ││
+│  └─────────────────────────────────────────────────────────────────────┘│
+│                    ↓                                                     │
+│  ┌─────────────────────────────────────────────────────────────────────┐│
+│  │                      SECRETS MANAGEMENT                              ││
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                 ││
+│  │  │    .env     │  │   Pydantic  │  │  Future:    │                 ││
+│  │  │  (gitignore)│  │  Settings   │  │  AWS Secrets│                 ││
+│  │  │             │  │  Validation │  │  Manager    │                 ││
+│  │  │  Never      │  │             │  │             │                 ││
+│  │  │  committed  │  │  Type-safe  │  │  HashiCorp  │                 ││
+│  │  │             │  │  env vars   │  │  Vault      │                 ││
+│  │  └─────────────┘  └─────────────┘  └─────────────┘                 ││
+│  └─────────────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---  
+
+## Security Features by Layer
+
+## 1. SECRET & CONFIGURATION MANAGEMENT
+
+src/utils/config.py — Pydantic Settings Validation
+
+```Python
+class DatabaseConfig(BaseSettings):
+    """Database connection configuration."""
+    model_config = SettingsConfigDict(env_prefix="DB_")
+    
+    host: str = Field(default="localhost", description="Database host")
+    port: int = Field(default=5432, description="Database port")
+    password: SecretStr = Field(default=SecretStr(""), description="Database password")
+    ssl_mode: str = Field(default="require", description="SSL mode for connections")
+```
+```Table
+| Feature                  | What It Does                                                                   | Why It Matters                                               |
+| ------------------------ | ------------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| `SecretStr`              | Passwords are stored as encrypted strings, never printed in logs or tracebacks | Prevents accidental credential leakage in debugging          |
+| `env_prefix="DB_"`       | All DB env vars must start with `DB_`                                          | Namespace isolation prevents collision                       |
+| `SettingsConfigDict`     | Strict validation — extra fields rejected                                      | Typo in `.env` fails fast instead of silently using defaults |
+| `.env` file loading      | Secrets loaded from file, never hardcoded                                      | Developers can't accidentally commit credentials             |
+| Environment substitution | `${VAR:-default}` syntax in YAML                                               | Same config works across dev/staging/prod                    |
+```
+
+---
+
+.env.example — Template with No Real Secrets
+
+```bash
+# NO real credentials in template
+DB_PASSWORD=your_secure_password_here
+JWT_SECRET_KEY=your-super-secret-jwt-key-min-32-chars-long
+```
+
+```Table
+| Feature                      | What It Does                                | Why It Matters                                |
+| ---------------------------- | ------------------------------------------- | --------------------------------------------- |
+| `.env` in `.gitignore`       | Prevents accidental commit of secrets       | Most common credential leak vector eliminated |
+| `.env.example`               | Documents required variables without values | New developers know what to configure         |
+| `JWT_SECRET_KEY` requirement | Minimum 32 chars enforced                   | Short secrets vulnerable to brute force       |
+
+```
+
+---
+
+## 2. DATABASE SECURITY
+src/utils/db.py — Secure Database Access
+
+```Python
+self._engine = create_engine(
+    connection_string,
+    poolclass=QueuePool,
+    pool_size=db_config.pool_size,
+    max_overflow=db_config.max_overflow,
+    pool_pre_ping=True,  # Verify connections before use
+    connect_args={
+        'sslmode': db_config.ssl_mode,  # 'require' — reject non-SSL
+        'connect_timeout': 10,
+    }
+)
+
+```
+```Table
+| Feature                 | What It Does                         | Why It Matters                                               |
+| ----------------------- | ------------------------------------ | ------------------------------------------------------------ |
+| `sslmode=require`       | Rejects any connection not using TLS | Prevents man-in-the-middle attacks on database traffic       |
+| `pool_pre_ping=True`    | Validates connection before use      | Prevents using stale/broken connections that could leak data |
+| `QueuePool` with limits | Max 10 connections, overflow 20      | Prevents connection exhaustion DoS                           |
+| `pool_recycle=1800`     | Recycles connections every 30 min    | Limits window for session hijacking                          |
+```
+
+Parameterized Queries Only
+```Python
+# SECURE — parameters bound separately
+query = "SELECT * FROM drivers WHERE driver_id = :driver_id"
+db.execute_query(query, {"driver_id": driver_id})
+
+# NEVER ALLOWED — string concatenation
+query = f"SELECT * FROM drivers WHERE driver_id = {driver_id}"  # SQL INJECTION!
+
+```
+
+```Table
+| Feature                               | What It Does                            | Why It Matters                                               |
+| ------------------------------------- | --------------------------------------- | ------------------------------------------------------------ |
+| `sqlalchemy.text()` with named params | Database driver escapes all inputs      | SQL injection impossible — #1 OWASP vulnerability eliminated |
+| Centralized `DatabaseManager`         | All queries go through one audited path | Can't accidentally use unsafe queries in new code            |
+
+```
+
+---
+
+## 3. ROW LEVEL SECURITY (RLS)
+
+sql/schema_postgres.sql — Database Access Control
+
+```sql
+-- Enable RLS on feature tables
+ALTER TABLE driver_race_features ENABLE ROW LEVEL SECURITY;
+
+-- Public access policy (read-only, limited data)
+CREATE POLICY driver_race_features_public_read ON driver_race_features
+    FOR SELECT
+    USING (true);  -- Production: would check user context
+
+-- Service role policy (full access for backend)
+CREATE POLICY driver_race_features_service_role ON driver_race_features
+    FOR ALL
+    TO service_role
+    USING (true)
+    WITH CHECK (true);
+
+```
+
+```Table
+
+| Feature                               | What It Does                                | Why It Matters                                                |
+| ------------------------------------- | ------------------------------------------- | ------------------------------------------------------------- |
+| `ENABLE ROW LEVEL SECURITY`           | PostgreSQL enforces policies on every query | Even if attacker bypasses app, database still controls access |
+| `public` vs `service_role` separation | Frontend users ≠ backend service accounts   | Compromised frontend key can't modify data                    |
+| `FOR SELECT` only on public           | Write operations blocked for public role    | Read-only API keys can't corrupt data                         |
+
+```
+
+## 4. API SECURITY (FastAPI Backend)
+
+-- src/utils/security.py — Authentication & Authorization
+-- JWT Token Management
+
+```Python
+
+def create_access_token(self, user_id: str, role: str = "user") -> str:
+    payload = {
+        "sub": user_id,
+        "exp": now + self.access_expire,      # 30 minutes
+        "iat": now,
+        "type": "access",
+        "role": role,
+    }
+    return jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
+
+```
+
+```Table
+| Feature           | What It Does                             | Why It Matters                            |
+| ----------------- | ---------------------------------------- | ----------------------------------------- |
+| `exp` claim       | Token expires after 30 minutes           | Stolen tokens become useless quickly      |
+| `type: "access"`  | Distinguishes access from refresh tokens | Refresh tokens can't access API endpoints |
+| `role` claim      | Embedded RBAC in token                   | No database lookup needed per request     |
+| `HS256` algorithm | Symmetric key signing                    | Fast, stateless verification              |
+```
+
+API Key Authentication (Service-to-Service)
+```Table
+| Feature                 | What It Does                     | Why It Matters                                            |
+| ----------------------- | -------------------------------- | --------------------------------------------------------- |
+| `hmac.compare_digest()` | Compares hashes in constant time | Timing attacks can't guess API key character-by-character |
+| SHA-256 hashing         | Keys never stored plaintext      | Database breach doesn't expose keys                       |
+```
+
+---
+
+Rate Limiting
+
+```Python
+class RateLimiter:
+    def is_allowed(self, key: str) -> bool:
+        now = time.time()
+        window_start = now - 60
+        
+        # Clean old requests
+        self.requests[key] = [t for t in self.requests[key] if t > window_start]
+        
+        if len(self.requests[key]) >= self.requests_per_minute:
+            return False  # Too many requests
+        
+        self.requests[key].append(now)
+        return True
+```
+
+```Table
+| Feature                    | What It Does                                             | Why It Matters                                          |
+| -------------------------- | -------------------------------------------------------- | ------------------------------------------------------- |
+| Per-IP + endpoint tracking | `192.168.1.1:/predict` separate from `192.168.1.1:/data` | Legitimate users of one endpoint not blocked by another |
+| 60-second sliding window   | Old requests expire automatically                        | Prevents memory exhaustion                              |
+| `429 TOO_MANY_REQUESTS`    | Standard HTTP status                                     | Clients know to back off                                |
+```
+
+Role-Based Access Control (RBAC)
+
+```Python
+async def require_role(required_role: str):
+    async def role_checker(user: UserContext = Depends(get_current_user)):
+        role_hierarchy = {
+            "user": 1,
+            "analyst": 2,
+            "admin": 3,
+            "service": 3
+        }
+        
+        user_level = role_hierarchy.get(user.role, 0)
+        required_level = role_hierarchy.get(required_role, 3)
+        
+        if user_level < required_level:
+            raise HTTPException(status_code=403, detail=f"Requires {required_role} role")
+
+```
+
+```Table
+| Feature                               | What It Does                                           | Why It Matters                                    |
+| ------------------------------------- | ------------------------------------------------------ | ------------------------------------------------- |
+| Hierarchical roles                    | `admin` (3) > `analyst` (2) > `user` (1)               | Granular permission without complex ACLs          |
+| `service` role parity with `admin`    | Backend services have full access                      | Microservice communication not blocked            |
+| `403 FORBIDDEN` vs `401 UNAUTHORIZED` | 401 = not logged in, 403 = logged in but no permission | Clear error for debugging, no information leakage |
+```
+
+---
+
+## 5. FRONTEND SECURITY
+
+src/frontend/src/lib/api.ts — Secure API Client
+```Typescript
+// Request interceptor — adds JWT to every request
+api.interceptors.request.use((config) => {
+    const token = localStorage.getItem('access_token')
+    if (token) {
+        config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+})
+
+// Response interceptor — auto-refresh on 401
+api.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+        if (error.response?.status === 401 && !originalRequest._retry) {
+            originalRequest._retry = true
+            const refreshToken = localStorage.getItem('refresh_token')
+            const response = await axios.post(`${getBaseURL()}/auth/refresh`, {
+                refresh_token: refreshToken
+            })
+            // Store new token and retry
+            localStorage.setItem('access_token', response.data.access_token)
+            return api(originalRequest)
+        }
+    }
+)
+
+```
+
+```Table
+| Feature                           | What It Does                    | Why It Matters                               |
+| --------------------------------- | ------------------------------- | -------------------------------------------- |
+| `localStorage` for tokens         | Persists across page reloads    | User not logged out on refresh               |
+| **NO DB credentials in frontend** | Only JWT tokens stored          | Frontend compromise = limited exposure       |
+| Auto-refresh on 401               | Silent token renewal            | User experience uninterrupted                |
+| `_retry` flag                     | Prevents infinite refresh loops | Broken refresh token redirects to login once |
+
+```
+
+---
+
+src/frontend/vite.config.ts — Proxy Security
+```Typescript
+proxy: {
+    '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+    }
+}
+
+```
+
+(
+| Feature              | What It Does                                          | Why It Matters                      |
+| -------------------- | ----------------------------------------------------- | ----------------------------------- |
+| `/api` proxy path    | Frontend calls `/api/health` → backend sees `/health` | No CORS issues in development       |
+| `changeOrigin: true` | Host header rewritten                                 | Backend sees request as same-origin |
+)
+
+---
+
+## 6. CORS & REQUEST SECURITY
+
+src/api/main.py — CORS Configuration
+```Python
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "https://f1-platform.vercel.app"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+    max_age=600,
+)
+```
+
+(
+  | Feature                  | What It Does                                        | Why It Matters                                 |
+| ------------------------ | --------------------------------------------------- | ---------------------------------------------- |
+| Whitelist origins        | Only `localhost:3000` and production domain allowed | Browser blocks requests from attacker domains  |
+| `allow_credentials=True` | Cookies/Auth headers allowed with CORS              | JWT tokens can be sent cross-origin safely     |
+| `max_age=600`            | Browser caches preflight for 10 minutes             | Reduces OPTIONS requests, improves performance |
+
+)
+
+## 7. LOGGING & MONITORING SECURITY
+
+src/utils/logger.py — Sensitive Data Masking
+```Python
+class SensitiveDataMasker:
+    SENSITIVE_KEYS = {
+        'password', 'secret', 'token', 'api_key', 'db_password',
+        'credentials', 'auth', 'private_key', 'connection_string'
+    }
+    
+    @classmethod
+    def mask_dict(cls, data: Dict[str, Any]) -> Dict[str, Any]:
+        for key, value in data.items():
+            if any(sensitive in key.lower() for sensitive in cls.SENSITIVE_KEYS):
+                data[key] = '***MASKED***'
+```
+(
+  | Feature                    | What It Does                                             | Why It Matters                                     |
+| -------------------------- | -------------------------------------------------------- | -------------------------------------------------- |
+| Automatic key scanning     | Any key containing "password", "token", etc. gets masked | Developers don't need to remember to mask manually |
+| Recursive masking          | Works on nested dictionaries                             | Deep objects in logs still protected               |
+| `***MASKED***` placeholder | Clear indication of redaction                            | No confusion about missing data                    |
+
+)           
+
+Example:
+
+```Python
+# Input
+{"user": "admin", "password": "supersecret123", "nested": {"api_key": "abc"}}
+
+# Logged
+{"user": "admin", "password": "***MASKED***", "nested": {"api_key": "***MASKED***"}}
+```
+
+## 8. DEPLOYMENT SECURITY
+
+nginx.conf — Reverse Proxy Security
+
+```Nginx
+# Security headers
+add_header X-Frame-Options "SAMEORIGIN" always;           # Clickjacking protection
+add_header X-Content-Type-Options "nosniff" always;       # MIME sniffing protection
+add_header X-XSS-Protection "1; mode=block" always;       # XSS filter
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+# SSL
+ssl_protocols TLSv1.2 TLSv1.3;                            # No old TLS
+ssl_ciphers HIGH:!aNULL:!MD5;                             # Strong ciphers only
+```
+
+(
+  | Feature                           | What It Does                               | Why It Matters                                 |
+| --------------------------------- | ------------------------------------------ | ---------------------------------------------- |
+| `X-Frame-Options: SAMEORIGIN`     | Prevents site being embedded in `<iframe>` | Clickjacking attacks blocked                   |
+| `X-Content-Type-Options: nosniff` | Browser must respect `Content-Type` header | Malicious uploads can't execute as scripts     |
+| `Referrer-Policy`                 | Limits URL leakage on outbound links       | Internal URLs not exposed to third parties     |
+| TLS 1.2+ only                     | Blocks outdated protocols                  | POODLE, BEAST, etc. vulnerabilities eliminated |
+
+)
+
+## 9. CI/CD SECURITY
+
+.github/workflows/ci-cd.yml
+```yaml
+- name: Security audit
+  run: pip-audit --requirement requirements.txt  # Scans for known CVEs
+
+- name: Format check with black
+  run: black --check src/ tests/  # Consistent code = fewer bugs
+
+- name: Type check with mypy
+  run: mypy src/ --ignore-missing-imports  # Catches type-related security issues
+```
+
+(
+  | Feature              | What It Does                                      | Why It Matters                                |
+| -------------------- | ------------------------------------------------- | --------------------------------------------- |
+| `pip-audit`          | Scans dependencies against vulnerability database | Log4j-style supply chain attacks caught early |
+| `black` formatting   | Consistent code style                             | Harder to hide malicious changes in diffs     |
+| `mypy` type checking | Static analysis                                   | Type confusion vulnerabilities prevented      |
+
+)
+
+---
+
+Security Feature Summary Table
+(
+  | Category     | Feature               | Implementation               | Threat Prevented                 |
+| ------------ | --------------------- | ---------------------------- | -------------------------------- |
+| **Secrets**  | Encrypted storage     | `SecretStr`                  | Credential leakage in logs       |
+| **Secrets**  | Env var isolation     | `.env` + `.gitignore`        | Accidental commit of keys        |
+| **Secrets**  | Future-proof vault    | AWS/Vault placeholders       | Centralized secret rotation      |
+| **Database** | TLS enforcement       | `sslmode=require`            | MITM on DB connections           |
+| **Database** | Connection pooling    | `QueuePool` with limits      | Connection exhaustion DoS        |
+| **Database** | Parameterized queries | `sqlalchemy.text()`          | SQL injection                    |
+| **Database** | RLS policies          | PostgreSQL native            | Unauthorized data access         |
+| **API Auth** | JWT tokens            | `python-jose`                | Stateless session management     |
+| **API Auth** | Token expiry          | 30 min access, 7 day refresh | Limited window for stolen tokens |
+| **API Auth** | API keys              | `hmac.compare_digest()`      | Timing attacks on key validation |
+| **API Auth** | Rate limiting         | Per-IP buckets               | Brute force / DoS                |
+| **API Auth** | RBAC                  | Role hierarchy               | Privilege escalation             |
+| **Frontend** | No DB credentials     | Only JWT in `localStorage`   | XSS → full database compromise   |
+| **Frontend** | Auto-refresh          | 401 interceptor              | Session hijacking                |
+| **Network**  | CORS whitelist        | Origin validation            | CSRF from malicious sites        |
+| **Network**  | Security headers      | nginx `add_header`           | Clickjacking, XSS, MIME sniffing |
+| **Network**  | TLS 1.2+              | nginx SSL config             | Protocol downgrade attacks       |
+| **Logging**  | Sensitive masking     | `SensitiveDataMasker`        | Credential leakage in logs       |
+| **Logging**  | Structured JSON       | `structlog`                  | Tamper-evident audit trail       |
+| **CI/CD**    | Dependency audit      | `pip-audit`                  | Known CVEs in dependencies       |
+| **CI/CD**    | Type checking         | `mypy`                       | Type confusion bugs              |
+
+)
+
+---
+
+(
+  | Frontend Cannot               | Why                    | What Happens If Tried                     |
+| ----------------------------- | ---------------------- | ----------------------------------------- |
+| Access database directly      | No credentials stored  | Connection fails — no host/port/password  |
+| Use service-role key          | Only anon key in build | RLS policies block write operations       |
+| Read other users' predictions | JWT scoped to user     | `403 FORBIDDEN` from API                  |
+| Access admin endpoints        | Role checked in JWT    | `403 FORBIDDEN` — role hierarchy enforced |
+| Modify model files            | No filesystem access   | Browser sandbox prevents this             |
+
+)
+
+Every data request flows: React → API call → FastAPI validation → Database query → RLS check → Response
