@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import { Trophy, TrendingUp, Users, Activity, Zap, Gauge } from 'lucide-react'
 import { useQuery } from 'react-query'
 import PredictionChart from '../components/charts/PredictionChart'
-import { api } from '../lib/api'
+import { apiClient as api } from '../lib/api'
 
 interface DashboardStats {
     total_races: number
