@@ -1,4 +1,4 @@
-import { useQuery } from 'react-query'
+import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { Users, TrendingUp, Award } from 'lucide-react'
 import { api } from '../lib/api'

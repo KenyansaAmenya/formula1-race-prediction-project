@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Trophy, TrendingUp, Users, Activity, Zap, Gauge } from 'lucide-react'
-import { useQuery } from 'react-query'
+import { useQuery } from '@tanstack/react-query'
 import PredictionChart from '../components/charts/PredictionChart'
 import { apiClient as api } from '../lib/api'
 
@@ -193,3 +193,4 @@ export default function Dashboard() {
         </div>
     )
 }
+
