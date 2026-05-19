@@ -1,37 +1,15 @@
 services:
-  - type: web
-    name: f1-ai-platform
-    runtime: python
-    plan: free
-    dockerfilePath: ./Dockerfile.render
-    dockerContext: .
+  - type: static
+    name: f1-frontend
+    runtime: static
+    buildCommand: cd src/frontend && npm install --legacy-peer-deps && npm run build
+    staticPublishPath: ./src/frontend/dist
     envVars:
-      - key: ENVIRONMENT
-        value: production
-      - key: DB_HOST
-        sync: false  # Set in Render dashboard
-      - key: DB_PORT
-        value: "5432"
-      - key: DB_NAME
-        value: postgres
-      - key: DB_USER
-        value: postgres
-      - key: DB_PASSWORD
-        sync: false  # Set in Render dashboard
-      - key: DB_SSL_MODE
-        value: require
-      - key: JWT_SECRET_KEY
-        generateValue: true  # Auto-generate
-      - key: API_KEY
-        generateValue: true
-      - key: PYTHONPATH
-        value: /app
-      - key: WEB_CONCURRENCY
-        value: "1"  # Single worker to save memory
-    healthCheckPath: /health
-    autoDeploy: true
-
-disk:
-  name: f1-data
-  mountPath: /app/data
-  sizeMB: 500
+      - key: VITE_API_URL
+        value: https://f1-api.onrender.com
+      - key: CI
+        value: false
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
