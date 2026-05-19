@@ -54,7 +54,11 @@ app = FastAPI(
 )
 
 # CORS configuration
-cors_origins = ["*"]  
+cors_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://f1-frontend-1j7l.onrender.com"  # Add your frontend URL
+]  
 if hasattr(config, 'api'):
     if hasattr(config.api, 'cors_origins'):
         cors_origins = config.api.cors_origins
