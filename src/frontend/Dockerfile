@@ -1,20 +1,23 @@
-# Stage 1: Build
-FROM node:20-alpine AS builder
+FROM node:18-alpine as build
 
 WORKDIR /app
 
+# Copy package files
 COPY package*.json ./
-RUN npm ci
+COPY .npmrc ./
 
+# Install dependencies with legacy peer deps
+RUN npm install --legacy-peer-deps
+
+# Copy source code
 COPY . .
+
+# Build the app
 RUN npm run build
 
-# Stage 2: Serve with nginx
+# Production stage
 FROM nginx:alpine
-
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-
+COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 80
 
 CMD ["nginx", "-g", "daemon off;"]
