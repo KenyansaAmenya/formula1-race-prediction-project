@@ -35,3 +35,5 @@ tenacity==8.2.3
 
 # Database Utilities (for async)
 greenlet==3.0.0
+
+PyJWT==2.8.0
