@@ -1,16 +1,37 @@
-﻿fastapi==0.104.1
+﻿# Web Framework
+fastapi==0.104.1
 uvicorn[standard]==0.24.0
+python-multipart==0.0.9
+
+# Database
 sqlalchemy==2.0.25
 psycopg2-binary==2.9.9
+alembic==1.12.0
+
+# Authentication
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
-python-multipart==0.0.9
+python-dotenv==1.0.0
+bcrypt==4.1.2
+
+# Configuration & Validation
 pydantic==2.5.0
 pydantic-settings==2.1.0
-python-dotenv==1.0.0
-# Required for prediction_service
+pyyaml==6.0.1
+
+# Data Processing (for prediction service)
 numpy==1.24.3
 pandas==2.0.3
 scikit-learn==1.3.0
 xgboost==2.0.0
 joblib==1.3.2
+
+# Logging
+structlog==24.1.0
+
+# HTTP & Utilities
+requests==2.31.0
+tenacity==8.2.3
+
+# Database Utilities (for async)
+greenlet==3.0.0
